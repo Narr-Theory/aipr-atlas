@@ -31,8 +31,6 @@
       width: 100%;
       height: 100%;
       border: 0;
-
-      /* Keep mobile gestures inside the atlas. */
       touch-action: none;
       user-select: none;
       -webkit-user-select: none;
@@ -50,10 +48,7 @@
     Your browser does not support SVG files.
   </object>
 
-  <!-- SVG pan/zoom library -->
   <script src="https://cdn.jsdelivr.net/npm/svg-pan-zoom@3.6.1/dist/svg-pan-zoom.min.js"></script>
-
-  <!-- Provides smoother mobile dragging and pinch-to-zoom -->
   <script src="https://cdn.jsdelivr.net/npm/hammerjs@2.0.8/hammer.min.js"></script>
 
   <script>
@@ -66,32 +61,29 @@
       var currentMode = null;
       var lastViewportWidth = window.innerWidth;
 
-      /*
-       * Desktop remains exactly as previously calibrated.
-       *
-       * Mobile is zoomed closer and moved upward so:
-       * - the large white area disappears;
-       * - Day to Day Workflow remains visible;
-       * - Decision Narrative becomes the focal point.
-       */
       var OPENING_VIEWS = {
+        /*
+         * Desktop view remains unchanged.
+         */
         desktop: {
           zoom: 3.0,
           panX: 0.04,
           panY: 0.86
         },
 
+        /*
+         * Mobile:
+         * 15% closer than the previous 4.0 zoom.
+         * Position adjusted to keep Decision Narrative central
+         * and Day to Day Workflow visible at the top.
+         */
         mobile: {
-          zoom: 4.0,
-          panX: 0.25,
-          panY: 0.42
+          zoom: 4.6,
+          panX: 0.295,
+          panY: 0.505
         }
       };
 
-      /*
-       * Uses a general mobile test rather than targeting a particular
-       * phone resolution. It also recognizes phones in landscape mode.
-       */
       function getLayoutMode() {
         var narrowScreen = window.innerWidth <= 768;
 
@@ -108,10 +100,6 @@
           : "desktop";
       }
 
-      /*
-       * Prevent the embedded SVG document from triggering browser-level
-       * scrolling or page zooming.
-       */
       function prepareEmbeddedSvg() {
         if (
           !svgObject.contentDocument ||
@@ -128,12 +116,6 @@
         svgRoot.style.webkitUserSelect = "none";
       }
 
-      /*
-       * Mobile gesture system:
-       * - one finger drags the atlas;
-       * - two fingers pinch to zoom;
-       * - two fingers can pan while pinching.
-       */
       function createMobileEventsHandler() {
         return {
           haltEventListeners: [
@@ -264,52 +246,35 @@
           panEnabled: true,
           zoomEnabled: true,
           controlIconsEnabled: true,
-
-          /*
-           * Disable double-click zoom on touch devices because mobile
-           * browsers may interpret it as browser-level zooming.
-           */
           dblClickZoomEnabled: !isMobile,
-
           mouseWheelZoomEnabled: true,
           preventMouseEventsDefault: true,
-
           zoomScaleSensitivity: isMobile ? 0.25 : 0.20,
-
           fit: true,
           center: true,
           contain: false,
-
           minZoom: 0.5,
           maxZoom: 20,
-
           refreshRate: "auto"
         };
 
         if (isMobile && window.Hammer) {
-          options.customEventsHandler = createMobileEventsHandler();
+          options.customEventsHandler =
+            createMobileEventsHandler();
         }
 
-        panZoomInstance = svgPanZoom(svgObject, options);
+        panZoomInstance = svgPanZoom(
+          svgObject,
+          options
+        );
 
-        /*
-         * Allow the SVG and its fonts to finish rendering before applying
-         * the opening camera.
-         */
         window.requestAnimationFrame(function () {
-          window.requestAnimationFrame(applyOpeningView);
+          window.requestAnimationFrame(
+            applyOpeningView
+          );
         });
       }
 
-      /*
-       * Mobile browser controls frequently change viewport HEIGHT.
-       * We resize the pan/zoom surface but do not fit, center, or reset it.
-       * Therefore the atlas no longer snaps back while the user moves it.
-       *
-       * The opening camera is reapplied only when:
-       * - the layout changes between desktop and mobile; or
-       * - the viewport width changes substantially, such as rotation.
-       */
       function handleViewportResize() {
         window.clearTimeout(resizeTimer);
 
@@ -321,24 +286,34 @@
           var newMode = getLayoutMode();
           var newWidth = window.innerWidth;
 
-          var modeChanged = newMode !== currentMode;
-          var substantialWidthChange =
-            Math.abs(newWidth - lastViewportWidth) > 80;
+          var modeChanged =
+            newMode !== currentMode;
 
+          var substantialWidthChange =
+            Math.abs(
+              newWidth - lastViewportWidth
+            ) > 80;
+
+          /*
+           * Height-only changes from Chrome's address bar
+           * will resize the surface without resetting the view.
+           */
           panZoomInstance.resize();
 
-          if (modeChanged || substantialWidthChange) {
+          if (
+            modeChanged ||
+            substantialWidthChange
+          ) {
             applyOpeningView();
           }
         }, 160);
       }
 
-      svgObject.addEventListener("load", initializeAtlas);
+      svgObject.addEventListener(
+        "load",
+        initializeAtlas
+      );
 
-      /*
-       * Covers the case where atlas.svg finished loading before this
-       * script reached the load listener.
-       */
       if (
         svgObject.contentDocument &&
         svgObject.contentDocument.documentElement
