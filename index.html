@@ -1,11 +1,11 @@
 <!DOCTYPE html>
-<html>
+<html lang="en">
 <head>
   <meta charset="UTF-8">
 
   <meta
     name="viewport"
-    content="width=device-width, initial-scale=1.0"
+    content="width=device-width, initial-scale=1, viewport-fit=cover"
   >
 
   <title>AIPR Atlas</title>
@@ -13,18 +13,29 @@
   <style>
     html,
     body {
-      margin: 0;
       width: 100%;
       height: 100%;
+      margin: 0;
       overflow: hidden;
-      background-color: #ffffff;
+      overscroll-behavior: none;
+      background: #ffffff;
+    }
+
+    body {
+      position: fixed;
+      inset: 0;
     }
 
     #atlas-svg {
+      display: block;
       width: 100%;
       height: 100%;
-      display: block;
-      background-color: #ffffff;
+      border: 0;
+
+      /* Keep mobile gestures inside the atlas. */
+      touch-action: none;
+      user-select: none;
+      -webkit-user-select: none;
     }
   </style>
 </head>
@@ -34,87 +45,313 @@
     id="atlas-svg"
     type="image/svg+xml"
     data="atlas.svg"
+    aria-label="AIPR Atlas"
   >
-    Your browser does not support SVGs.
+    Your browser does not support SVG files.
   </object>
 
+  <!-- SVG pan/zoom library -->
   <script src="https://cdn.jsdelivr.net/npm/svg-pan-zoom@3.6.1/dist/svg-pan-zoom.min.js"></script>
 
+  <!-- Provides smoother mobile dragging and pinch-to-zoom -->
+  <script src="https://cdn.jsdelivr.net/npm/hammerjs@2.0.8/hammer.min.js"></script>
+
   <script>
-    var svgObject = document.getElementById('atlas-svg');
-    var panZoomInstance = null;
-    var resizeTimer = null;
+    (function () {
+      "use strict";
 
-    /*
-     * Calibrated from your manually positioned screenshot.
-     */
-    var INITIAL_ZOOM = 3.0;
-    var INITIAL_PAN_X = 0.04;
-    var INITIAL_PAN_Y = 0.86;
-
-    function applyInitialView() {
-      if (!panZoomInstance) return;
+      var svgObject = document.getElementById("atlas-svg");
+      var panZoomInstance = null;
+      var resizeTimer = null;
+      var currentMode = null;
+      var lastViewportWidth = window.innerWidth;
 
       /*
-       * Begin from the complete fitted and centred view.
+       * Desktop remains exactly as previously calibrated.
+       *
+       * Mobile is zoomed closer and moved upward so:
+       * - the large white area disappears;
+       * - Day to Day Workflow remains visible;
+       * - Decision Narrative becomes the focal point.
        */
-      panZoomInstance.resize();
-      panZoomInstance.fit();
-      panZoomInstance.center();
+      var OPENING_VIEWS = {
+        desktop: {
+          zoom: 3.0,
+          panX: 0.04,
+          panY: 0.86
+        },
+
+        mobile: {
+          zoom: 4.0,
+          panX: 0.25,
+          panY: 0.42
+        }
+      };
 
       /*
-       * Apply the stronger opening zoom.
+       * Uses a general mobile test rather than targeting a particular
+       * phone resolution. It also recognizes phones in landscape mode.
        */
-      panZoomInstance.zoom(INITIAL_ZOOM);
+      function getLayoutMode() {
+        var narrowScreen = window.innerWidth <= 768;
+
+        var coarsePointer =
+          window.matchMedia &&
+          window.matchMedia("(pointer: coarse)").matches;
+
+        var mobileSizedTouchscreen =
+          coarsePointer &&
+          Math.min(window.innerWidth, window.innerHeight) <= 900;
+
+        return narrowScreen || mobileSizedTouchscreen
+          ? "mobile"
+          : "desktop";
+      }
 
       /*
-       * Reposition the enlarged Atlas to approximate
-       * your manually selected opening view.
+       * Prevent the embedded SVG document from triggering browser-level
+       * scrolling or page zooming.
        */
-      requestAnimationFrame(function() {
+      function prepareEmbeddedSvg() {
+        if (
+          !svgObject.contentDocument ||
+          !svgObject.contentDocument.documentElement
+        ) {
+          return;
+        }
+
+        var svgRoot = svgObject.contentDocument.documentElement;
+
+        svgRoot.style.touchAction = "none";
+        svgRoot.style.overscrollBehavior = "none";
+        svgRoot.style.userSelect = "none";
+        svgRoot.style.webkitUserSelect = "none";
+      }
+
+      /*
+       * Mobile gesture system:
+       * - one finger drags the atlas;
+       * - two fingers pinch to zoom;
+       * - two fingers can pan while pinching.
+       */
+      function createMobileEventsHandler() {
+        return {
+          haltEventListeners: [
+            "touchstart",
+            "touchend",
+            "touchmove",
+            "touchleave",
+            "touchcancel"
+          ],
+
+          init: function (options) {
+            var instance = options.instance;
+            var initialScale = 1;
+            var previousDeltaX = 0;
+            var previousDeltaY = 0;
+
+            this.hammer = new Hammer.Manager(options.svgElement, {
+              touchAction: "none"
+            });
+
+            var panRecognizer = new Hammer.Pan({
+              threshold: 0,
+              pointers: 0
+            });
+
+            var pinchRecognizer = new Hammer.Pinch({
+              threshold: 0
+            });
+
+            pinchRecognizer.recognizeWith(panRecognizer);
+
+            this.hammer.add([
+              panRecognizer,
+              pinchRecognizer
+            ]);
+
+            this.hammer.on("panstart", function (event) {
+              previousDeltaX = 0;
+              previousDeltaY = 0;
+
+              if (event.srcEvent) {
+                event.srcEvent.preventDefault();
+              }
+            });
+
+            this.hammer.on("panmove", function (event) {
+              instance.panBy({
+                x: event.deltaX - previousDeltaX,
+                y: event.deltaY - previousDeltaY
+              });
+
+              previousDeltaX = event.deltaX;
+              previousDeltaY = event.deltaY;
+
+              if (event.srcEvent) {
+                event.srcEvent.preventDefault();
+              }
+            });
+
+            this.hammer.on("pinchstart", function (event) {
+              initialScale = instance.getZoom();
+
+              if (event.srcEvent) {
+                event.srcEvent.preventDefault();
+              }
+            });
+
+            this.hammer.on("pinchmove", function (event) {
+              instance.zoomAtPoint(
+                initialScale * event.scale,
+                {
+                  x: event.center.x,
+                  y: event.center.y
+                }
+              );
+
+              if (event.srcEvent) {
+                event.srcEvent.preventDefault();
+              }
+            });
+          },
+
+          destroy: function () {
+            if (this.hammer) {
+              this.hammer.destroy();
+              this.hammer = null;
+            }
+          }
+        };
+      }
+
+      function applyOpeningView() {
+        if (!panZoomInstance) {
+          return;
+        }
+
+        currentMode = getLayoutMode();
+        lastViewportWidth = window.innerWidth;
+
+        var view = OPENING_VIEWS[currentMode];
+
+        panZoomInstance.resize();
+        panZoomInstance.fit();
+        panZoomInstance.center();
+        panZoomInstance.zoom(view.zoom);
+
         var sizes = panZoomInstance.getSizes();
 
         panZoomInstance.panBy({
-          x: sizes.width * INITIAL_PAN_X,
-          y: sizes.height * INITIAL_PAN_Y
+          x: sizes.width * view.panX,
+          y: sizes.height * view.panY
         });
-      });
-    }
+      }
 
-    function initPanZoom() {
-      panZoomInstance = svgPanZoom(svgObject, {
-        zoomEnabled: true,
-        controlIconsEnabled: true,
-        fit: true,
-        center: true,
-        minZoom: 0.5,
-        maxZoom: 20
-      });
+      function initializeAtlas() {
+        if (panZoomInstance) {
+          return;
+        }
+
+        prepareEmbeddedSvg();
+
+        currentMode = getLayoutMode();
+        lastViewportWidth = window.innerWidth;
+
+        var isMobile = currentMode === "mobile";
+
+        var options = {
+          panEnabled: true,
+          zoomEnabled: true,
+          controlIconsEnabled: true,
+
+          /*
+           * Disable double-click zoom on touch devices because mobile
+           * browsers may interpret it as browser-level zooming.
+           */
+          dblClickZoomEnabled: !isMobile,
+
+          mouseWheelZoomEnabled: true,
+          preventMouseEventsDefault: true,
+
+          zoomScaleSensitivity: isMobile ? 0.25 : 0.20,
+
+          fit: true,
+          center: true,
+          contain: false,
+
+          minZoom: 0.5,
+          maxZoom: 20,
+
+          refreshRate: "auto"
+        };
+
+        if (isMobile && window.Hammer) {
+          options.customEventsHandler = createMobileEventsHandler();
+        }
+
+        panZoomInstance = svgPanZoom(svgObject, options);
+
+        /*
+         * Allow the SVG and its fonts to finish rendering before applying
+         * the opening camera.
+         */
+        window.requestAnimationFrame(function () {
+          window.requestAnimationFrame(applyOpeningView);
+        });
+      }
 
       /*
-       * Allow the embedded SVG to finish rendering.
+       * Mobile browser controls frequently change viewport HEIGHT.
+       * We resize the pan/zoom surface but do not fit, center, or reset it.
+       * Therefore the atlas no longer snaps back while the user moves it.
+       *
+       * The opening camera is reapplied only when:
+       * - the layout changes between desktop and mobile; or
+       * - the viewport width changes substantially, such as rotation.
        */
-      setTimeout(applyInitialView, 100);
-    }
+      function handleViewportResize() {
+        window.clearTimeout(resizeTimer);
 
-    svgObject.addEventListener(
-      'load',
-      initPanZoom
-    );
+        resizeTimer = window.setTimeout(function () {
+          if (!panZoomInstance) {
+            return;
+          }
 
-    window.addEventListener(
-      'resize',
-      function() {
-        if (!panZoomInstance) return;
+          var newMode = getLayoutMode();
+          var newWidth = window.innerWidth;
 
-        clearTimeout(resizeTimer);
+          var modeChanged = newMode !== currentMode;
+          var substantialWidthChange =
+            Math.abs(newWidth - lastViewportWidth) > 80;
 
-        resizeTimer = setTimeout(
-          applyInitialView,
-          100
-        );
+          panZoomInstance.resize();
+
+          if (modeChanged || substantialWidthChange) {
+            applyOpeningView();
+          }
+        }, 160);
       }
-    );
+
+      svgObject.addEventListener("load", initializeAtlas);
+
+      /*
+       * Covers the case where atlas.svg finished loading before this
+       * script reached the load listener.
+       */
+      if (
+        svgObject.contentDocument &&
+        svgObject.contentDocument.documentElement
+      ) {
+        initializeAtlas();
+      }
+
+      window.addEventListener(
+        "resize",
+        handleViewportResize,
+        { passive: true }
+      );
+    })();
   </script>
 </body>
 </html>
