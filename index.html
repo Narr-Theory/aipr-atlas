@@ -46,35 +46,36 @@
     var resizeTimer = null;
 
     /*
-     * Opening-view settings
+     * Opening view:
+     * 2.2 = substantially more zoomed in.
      */
-    var INITIAL_ZOOM = 1.35;
+    var INITIAL_ZOOM = 2.2;
 
     /*
-     * Positive X moves the Atlas to the right.
-     * Positive Y moves the Atlas downward.
+     * Reposition the enlarged Atlas so that
+     * Decision Narrative remains near the upper centre.
      */
-    var INITIAL_PAN_X = 0.05;
-    var INITIAL_PAN_Y = 0.08;
+    var INITIAL_PAN_X = 0.08;
+    var INITIAL_PAN_Y = 0.30;
 
     function applyInitialView() {
       if (!panZoomInstance) return;
 
       /*
-       * Begin from the standard fitted and centred view.
+       * Return to the complete fitted view first.
        */
       panZoomInstance.resize();
       panZoomInstance.fit();
       panZoomInstance.center();
 
       /*
-       * Zoom 35% closer.
+       * Apply the stronger opening zoom.
        */
       panZoomInstance.zoom(INITIAL_ZOOM);
 
       /*
-       * Shift the enlarged Atlas toward the approximate
-       * location of the Decision Narrative section.
+       * Shift the enlarged Atlas toward the
+       * Decision Narrative area.
        */
       requestAnimationFrame(function() {
         var sizes = panZoomInstance.getSizes();
@@ -97,8 +98,8 @@
       });
 
       /*
-       * Allow the embedded SVG to finish rendering
-       * before applying the opening position.
+       * Give the SVG time to render before
+       * applying the opening view.
        */
       setTimeout(applyInitialView, 100);
     }
